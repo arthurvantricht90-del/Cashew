@@ -12,7 +12,7 @@ Chart.register(...registerables);
 // ---------------- State ----------------
 const S = {
   settings: { lang: 'en', theme: 'system', anchor: '2026-01-05', ptype: 'month', view: 'numbers', showSavings: false, acct: '',
-    evo: { step: 'month', range: 'r6m', cats: [] } },
+    evo: { step: 'month', range: 'r6m', cats: [], total: true } },
   cats: [], accounts: [], rules: [], txs: [], pdfs: [],
 };
 const UI = { tab: 'overview', period: null, filter: { q: '', acct: '', cat: '', start: '', end: '' }, charts: [] };
@@ -371,7 +371,9 @@ function vEvolution() {
     </div>
     <div class="card">
       <div class="small muted" style="margin-bottom:8px">${esc(T('pickCats'))}</div>
-      <div class="pick" id="evo-pick">${pickable.map(c => `<label class="${evo.cats.includes(c.id) ? 'on' : ''}"><input type="checkbox" value="${c.id}" ${evo.cats.includes(c.id) ? 'checked' : ''}>${esc(catName(c.id))}</label>`).join('')}</div>
+      <div class="pick" id="evo-pick">
+        <label class="${evo.total !== false ? 'on' : ''}" style="flex-basis:100%; justify-content:center; font-weight:600"><input type="checkbox" value="_total" ${evo.total !== false ? 'checked' : ''}>${esc(T('total'))}</label>
+        ${pickable.map(c => `<label class="${evo.cats.includes(c.id) ? 'on' : ''}"><input type="checkbox" value="${c.id}" ${evo.cats.includes(c.id) ? 'checked' : ''}>${esc(catName(c.id))}</label>`).join('')}</div>
     </div>`;
 }
 function afterEvolution() {
@@ -382,18 +384,20 @@ function afterEvolution() {
   seg('evo-step', 'step'); seg('evo-range', 'range');
   $('evo-pick').onchange = e => {
     const v = e.target.value;
+    if (v === '_total') { evo.total = e.target.checked; saveSettings(); render(); return; }
     if (e.target.checked) { if (evo.cats.length >= 4) { e.target.checked = false; toast(T('pickCats')); return; } evo.cats.push(v); }
     else evo.cats = evo.cats.filter(c => c !== v);
     saveSettings(); render();
   };
   const buckets = evoBuckets(), cm = catMap();
   const sums = buckets.map(p => totals(viewTxs(), p.start, p.end));
-  const series = [{ label: T('total'), data: sums.map(by => headline(by, cm).spent) }];
+  // Colours stay fixed: Total always uses the first colour, chosen categories the next ones
+  const colors = SERIES(), series = [];
+  if (evo.total !== false) series.push({ label: T('total'), data: sums.map(by => headline(by, cm).spent), color: colors[0] });
   for (const id of evo.cats) {
     const k = cm[id]?.kind;
-    series.push({ label: catName(id), data: sums.map(by => r2((k === 'income' ? 1 : -1) * (by[id] || 0))) });
+    series.push({ label: catName(id), data: sums.map(by => r2((k === 'income' ? 1 : -1) * (by[id] || 0))), color: colors[1 + evo.cats.indexOf(id)] });
   }
-  const colors = SERIES();
   const labels = buckets.map(p => S.settings.evo.step === 'month'
     ? parseISO(p.start).toLocaleDateString(LOC(), { month: 'short', year: '2-digit' })
     : parseISO(p.start).toLocaleDateString(LOC(), { day: 'numeric', month: 'short' }));
@@ -401,13 +405,14 @@ function afterEvolution() {
   Chart.defaults.color = cssVar('--text-2');
   UI.charts.push(new Chart($('c-evo'), {
     type: 'line',
-    data: { labels, datasets: series.map((s, i) => ({ ...s, borderColor: colors[i], backgroundColor: colors[i], borderWidth: 2, pointRadius: buckets.length > 30 ? 0 : 3, pointHoverRadius: 5, tension: 0 })) },
+    data: { labels, datasets: series.map(s => ({ label: s.label, data: s.data, borderColor: s.color, backgroundColor: s.color, borderWidth: 2, pointRadius: buckets.length > 30 ? 0 : 3, pointHoverRadius: 5, tension: 0 })) },
     options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${fmt(c.raw)}` } } },
       scales: { x: { grid: { display: false }, border: { color: cssVar('--line') }, ticks: { maxRotation: 0, autoSkipPadding: 12 } },
         y: { grid: { color: cssVar('--grid') }, border: { display: false }, ticks: { callback: v => fmt(v).replace(/[,.]00(?!\d)/, '') } } } },
   }));
-  $('evo-legend').innerHTML = series.map((s, i) => `<span><i class="swatch" style="background:${colors[i]}"></i>${esc(s.label)}</span>`).join('');
+  $('evo-legend').innerHTML = series.length ? series.map(s => `<span><i class="swatch" style="background:${s.color}"></i>${esc(s.label)}</span>`).join('')
+    : `<span class="muted">${esc(T('pickSomething'))}</span>`;
   $('evo-table').innerHTML = `<table class="chart-table"><tr><th>${esc(T('periodOf'))}</th>${series.map(s => `<th>${esc(s.label)}</th>`).join('')}</tr>` +
     buckets.map((p, j) => `<tr><td>${esc(periodLabel(p, evo.step))}</td>${series.map(s => `<td>${fmt(s.data[j])}</td>`).join('')}</tr>`).join('') + '</table>';
 }
