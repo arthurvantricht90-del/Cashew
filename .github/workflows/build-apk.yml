@@ -1,0 +1,52 @@
+name: Build Cashew APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install and build the web app
+        run: |
+          npm ci
+          node build.mjs
+          npx cap sync android
+
+      - name: Build APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+          mkdir -p ../out
+          cp app/build/outputs/apk/release/app-release.apk ../out/Cashew-1.0.${{ github.run_number }}.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Cashew-1.0.${{ github.run_number }}
+          path: out/*.apk
+
+      - name: Publish as a release (easy download)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Cashew 1.0.${{ github.run_number }}
+          files: out/*.apk
+          make_latest: true

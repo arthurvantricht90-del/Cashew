@@ -1,0 +1,6 @@
+{
+  "appId": "be.arthurvantricht.cashew",
+  "appName": "Cashew",
+  "webDir": "dist",
+  "android": { "allowMixedContent": false }
+}
