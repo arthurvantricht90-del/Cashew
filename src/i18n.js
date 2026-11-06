@@ -41,7 +41,7 @@ export const STR = {
     reapply: 'Re-apply rules', reapplied: n => `${n} transactions re-categorized.`,
     open: 'Open', noStatements: 'No statements stored yet.',
     inUse: 'This category is still used.', splitShort: 'split',
-    periodOf: 'Period', allAccts: 'All accounts', newCatOption: '＋ New category…', create: 'Create', catCreated: n => `Category “${n}” added.`,
+    periodOf: 'Period', allAccts: 'All accounts', newCatOption: '＋ New category…', otherExplain: 'The smaller categories, grouped together in the pie chart. Tap one to see its transactions.', create: 'Create', catCreated: n => `Category “${n}” added.`,
   },
   nl: {
     overview: 'Overzicht', evolution: 'Evolutie', transactions: 'Verrichtingen', review: 'Nakijken', settings: 'Instellingen',
@@ -85,6 +85,6 @@ export const STR = {
     reapply: 'Regels opnieuw toepassen', reapplied: n => `${n} verrichtingen opnieuw ingedeeld.`,
     open: 'Openen', noStatements: 'Nog geen uittreksels bewaard.',
     inUse: 'Deze categorie wordt nog gebruikt.', splitShort: 'verdeeld',
-    periodOf: 'Periode', allAccts: 'Alle rekeningen', newCatOption: '＋ Nieuwe categorie…', create: 'Aanmaken', catCreated: n => `Categorie “${n}” toegevoegd.`,
+    periodOf: 'Periode', allAccts: 'Alle rekeningen', newCatOption: '＋ Nieuwe categorie…', otherExplain: 'De kleinere categorieën, samengenomen in de taartgrafiek. Tik op een categorie om de verrichtingen te zien.', create: 'Aanmaken', catCreated: n => `Categorie “${n}” toegevoegd.`,
   },
 };

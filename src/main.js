@@ -306,9 +306,11 @@ function afterOverview() {
       type: 'pie',
       data: { labels: data.map(d => d.label), datasets: [{ data: data.map(d => d.value), backgroundColor: colors, borderColor: surface, borderWidth: 2, hoverOffset: 6 }] },
       options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${fmt(c.raw)} · ${Math.round(c.raw / total * 100)}%` } } },
-        onClick: (e, els) => { if (els[0]) { const d = data[els[0].index]; if (d.id !== '_other') gotoTx(d.id); } } },
+        onClick: (e, els) => { if (els[0]) openSlice(data[els[0].index]); } },
     }));
-    $('pie-legend').innerHTML = data.map((d, i) => `<span><i class="swatch" style="background:${colors[i]}"></i>${esc(d.label)} <b class="num" style="color:var(--text)">${fmt(d.value)}</b> <span class="faint">${Math.round(d.value / total * 100)}%</span></span>`).join('');
+    const openSlice = d => d.id === '_other' ? openOther(rest, total) : gotoTx(d.id);
+    $('pie-legend').innerHTML = data.map((d, i) => `<button class="leg" data-li="${i}"><i class="swatch" style="background:${colors[i]}"></i>${esc(d.label)}${d.id === '_other' ? ` <span class="faint">(${rest.length})</span>` : ''} <b class="num" style="color:var(--text)">${fmt(d.value)}</b> <span class="faint">${Math.round(d.value / total * 100)}%</span></button>`).join('');
+    $('pie-legend').querySelectorAll('[data-li]').forEach(b => b.onclick = () => openSlice(data[+b.dataset.li]));
   } else if (S.settings.view === 'bar') {
     UI.charts.push(new Chart($('c-bar'), {
       type: 'bar',
@@ -326,6 +328,18 @@ function afterOverview() {
         onClick: (e, els) => { if (els[0]) gotoTx(pos[els[0].index].id); } },
     }));
   }
+}
+// Shows the categories grouped under "Other" in the pie chart
+function openOther(rest, total) {
+  sheet(`<h2>${esc(T('other'))} · ${fmt(rest.reduce((a, r) => a + r.value, 0))}</h2>
+    <p class="small muted" style="margin-top:-6px">${esc(T('otherExplain'))}</p>
+    <ul class="cats">${rest.map(r => `<li data-cat="${r.id}"><span class="cn ellip">${esc(catName(r.id))}</span>
+      <span class="cv">${fmt(r.value)} <span class="pct">${Math.round(r.value / total * 100)}%</span></span></li>`).join('')}</ul>
+    <div class="actions"><button class="btn" id="o-close">${esc(T('close'))}</button></div>`,
+  (el, close) => {
+    el.querySelector('#o-close').onclick = close;
+    el.querySelectorAll('[data-cat]').forEach(li => li.onclick = () => { close(); gotoTx(li.dataset.cat); });
+  });
 }
 function gotoTx(cat) {
   UI.filter = { q: '', acct: viewTxs() === S.txs ? '' : S.settings.acct, cat, start: UI.period.start, end: UI.period.end };

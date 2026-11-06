@@ -169,3 +169,5 @@ details summary { cursor: pointer; color: var(--text-2); font-size: 13px; margin
 
 .acct-seg { overflow-x: auto; scrollbar-width: none; }
 .acct-seg button { flex: 1 0 auto; }
+.legend .leg { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 4px 6px; margin: -4px -6px; border-radius: 8px; cursor: pointer; color: inherit; font-size: inherit; }
+.legend .leg:hover { background: var(--surface-2); }
