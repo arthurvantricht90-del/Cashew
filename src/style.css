@@ -99,7 +99,7 @@ header.top h1 { font-size: 22px; font-weight: 650; margin: 0; letter-spacing: -.
 
 /* Bottom nav */
 nav.bottom { position: fixed; left: 0; right: 0; bottom: 0; background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(12px); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); z-index: 10; }
-nav.bottom .in { max-width: 560px; margin: 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); }
+nav.bottom .in { max-width: 560px; margin: 0 auto; display: grid; grid-template-columns: repeat(5, 1fr); }
 nav.bottom button { border: 0; background: none; padding: 8px 0 10px; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 11.5px; color: var(--text-3); cursor: pointer; position: relative; }
 nav.bottom button svg { width: 24px; height: 24px; }
 nav.bottom button.on { color: var(--accent); font-weight: 600; }
@@ -171,3 +171,8 @@ details summary { cursor: pointer; color: var(--text-2); font-size: 13px; margin
 .acct-seg button { flex: 1 0 auto; }
 .legend .leg { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 4px 6px; margin: -4px -6px; border-radius: 8px; cursor: pointer; color: inherit; font-size: inherit; }
 .legend .leg:hover { background: var(--surface-2); }
+.bline { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); }
+#b-income, #b-goal { cursor: pointer; }
+.edit-ic { color: var(--accent); font-size: 13px; }
+.meter-lg { height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; margin-top: 8px; }
+.meter-lg i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
