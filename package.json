@@ -22,7 +22,6 @@
     "pdfjs-dist": "^4.10.38"
   },
   "devDependencies": {
-    "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^6.2.3",
     "esbuild": "^0.24.2"
   }
