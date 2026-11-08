@@ -34,7 +34,9 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          # Retry: downloads from Gradle's servers occasionally time out on GitHub
+          for i in 1 2 3; do ./gradlew assembleRelease --no-daemon && break; echo "Attempt $i failed, retrying in 20s"; sleep 20; done
+          test -f app/build/outputs/apk/release/app-release.apk
           mkdir -p ../out
           cp app/build/outputs/apk/release/app-release.apk ../out/Cashew-1.0.${{ github.run_number }}.apk
 
