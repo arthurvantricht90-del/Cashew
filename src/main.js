@@ -211,7 +211,7 @@ function render() {
   const rc = reviewCount();
   const showGear = !['settings', 'review'].includes(UI.tab);
   app.innerHTML = `
-    <header class="hero"><div class="hero-in">
+    <header class="hero ${v.heroClass || ''}"><div class="hero-in">
       <div class="hero-top">
         ${v.back ? `<button class="hero-btn" data-tab="${v.back}" data-sub="${v.backSub || ''}" aria-label="Back">${I.back}</button>` : ''}
         <h1>${esc(v.title || T(UI.tab))}</h1>
@@ -226,6 +226,7 @@ function render() {
         <button data-tab="${k}" class="${UI.tab === k || (k === 'transactions' && UI.tab === 'review') ? 'on' : ''}">${I[k]}<span>${esc(T(k))}</span>
         ${k === 'transactions' && rc ? `<span class="badge">${rc > 99 ? '99+' : rc}</span>` : ''}</button>`).join('')}
     </div></nav>`;
+  setStatusBar(cssVar(v.heroClass === 'over' ? '--hero-over' : '--hero'));
   const after = { budget: afterBudget, overview: afterOverview, evolution: afterEvolution, transactions: afterTransactions, review: afterReview, settings: afterSettings };
   after[UI.tab]?.();
 }
@@ -929,8 +930,9 @@ function vBudget() {
   const freqLabel = f => T('freq_' + (f.freq || 'monthly'));
   const over = b.left < 0;
   return {
+    heroClass: over ? 'over' : '',
     hero: ctxBar('bu', periodLabel(m, 'month'), { tappable: false }) +
-      bigNum(over ? T('overBudget') : T('stillAvailable'), fmt(Math.abs(b.left)),
+      bigNum(over ? '⚠ ' + T('overBudget') : T('stillAvailable'), over ? fmt(b.left) : fmt(b.left),
         `${fmt(b.flex)} ${esc(T('spentOf'))} ${fmt(b.free)}`,
         `<div class="hero-meter ${over ? 'over' : ''}"><i style="width:${pct}%"></i></div>`),
     body: `

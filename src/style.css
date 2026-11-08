@@ -19,6 +19,7 @@
   --radius: 16px;
   --hero: #2470cc;
   --hero-ink: #ffffff;
+  --hero-over: #c23434;
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
@@ -40,6 +41,7 @@
   --shadow: none;
   --hero: #1d5aa3;
   --hero-ink: #ffffff;
+  --hero-over: #a32d2d;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
@@ -204,7 +206,9 @@ details summary { cursor: pointer; color: var(--text-2); font-size: 13px; margin
 .big-s .dot { margin: 0 8px; opacity: .7; }
 .hero-meter { height: 8px; background: rgba(255,255,255,.22); border-radius: 4px; overflow: hidden; margin: 14px auto 0; max-width: 320px; }
 .hero-meter i { display: block; height: 100%; background: #fff; border-radius: 4px; }
-.hero-meter.over i { background: #ffb4a8; }
+.hero-meter.over i { background: #fff; }
+.hero.over { background: var(--hero-over); transition: background .2s; }
+.hero.over .big-l { opacity: 1; font-weight: 650; }
 .hero-search { margin-top: 6px; }
 .hero-search input { background: rgba(255,255,255,.95); border: 0; color: #0b0b0b; border-radius: 12px; padding: 11px 14px; }
 :root[data-theme="dark"] .hero-search input { background: rgba(0,0,0,.25); color: #fff; }
