@@ -5,7 +5,7 @@ import { CATEGORIES, ACCOUNTS, RULES } from './seed.js';
 import { BANKS, detectBank } from './banks/index.js';
 import { applyRules, parts, periodOf, shiftPeriod, totals, headline, iso, parseISO, r2 } from './engine.js';
 import { readPdfPages } from './pdf.js';
-import { saveFile, openPdf, onBack } from './native.js';
+import { saveFile, openPdf, onBack, setStatusBar } from './native.js';
 
 Chart.register(...registerables);
 
@@ -70,6 +70,7 @@ function applyTheme() {
   const th = S.settings.theme === 'system' ? (mq.matches ? 'dark' : 'light') : S.settings.theme;
   document.documentElement.dataset.theme = th;
   document.documentElement.lang = S.settings.lang;
+  setStatusBar(cssVar('--hero'));
 }
 mq.addEventListener?.('change', () => { applyTheme(); render(); });
 const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -91,16 +92,24 @@ const I = {
 // ---------------- Helpers ----------------
 const ownAccts = () => [...new Set(S.txs.map(t => t.acct))];
 const viewTxs = () => (S.settings.acct && ownAccts().includes(S.settings.acct)) ? S.txs.filter(t => t.acct === S.settings.acct) : S.txs;
-function acctSwitch() {
-  const accts = ownAccts(); if (accts.length < 2) return '';
-  const cur = accts.includes(S.settings.acct) ? S.settings.acct : '';
-  return `<div class="seg acct-seg" id="acct-seg" style="margin-bottom:10px">${[['', T('allAccts')], ...accts.map(a => [a, accName(a)])]
-    .map(([v, l]) => `<button data-v="${v}" class="${cur === v ? 'on' : ''}">${esc(l)}</button>`).join('')}</div>`;
+const curAcct = () => ownAccts().includes(S.settings.acct) ? S.settings.acct : '';
+const acctOpts = () => [['', T('allAccts')], ...ownAccts().map(a => [a, accName(a)])];
+const acctSuffix = () => ownAccts().length > 1 ? ' · ' + (curAcct() ? accName(curAcct()) : T('allAccts')) : '';
+function segHtml(id, opts, cur) {
+  return `<div class="seg" id="${id}">${opts.map(([v, l]) => `<button data-v="${v}" class="${cur === v ? 'on' : ''}">${esc(l)}</button>`).join('')}</div>`;
 }
-function bindAcctSwitch() {
-  const el = document.getElementById('acct-seg'); if (!el) return;
-  el.onclick = e => { const b = e.target.closest('button'); if (!b) return; S.settings.acct = b.dataset.v; saveSettings(); render(); };
+function bindSeg(root, id, fn) {
+  const el = root.querySelector('#' + id); if (!el) return;
+  el.onclick = e => { const b = e.target.closest('button'); if (!b) return; el.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); fn(b.dataset.v); };
 }
+// Hero building blocks: context bar (period/filters) and the one big number
+function ctxBar(id, label, { arrows = true, tappable = true } = {}) {
+  return `<div class="ctx">
+    ${arrows ? `<button class="ctx-arrow" id="${id}-prev" aria-label="Previous">${I.back}</button>` : ''}
+    ${tappable ? `<button class="ctx-chip" id="${id}">${esc(label)} <span class="caret">▾</span></button>` : `<span class="ctx-chip static">${esc(label)}</span>`}
+    ${arrows ? `<button class="ctx-arrow" id="${id}-next" aria-label="Next">${I.fwd}</button>` : ''}</div>`;
+}
+const bigNum = (label, value, sub = '', extra = '') => `<div class="big"><div class="big-l">${esc(label)}</div><div class="big-v num">${value}</div>${sub ? `<div class="big-s">${sub}</div>` : ''}${extra}</div>`;
 function confirmSheet(msg, okLabel) {
   return new Promise(res => sheet(`<p style="margin:4px 0 0">${esc(msg)}</p>
     <div class="actions"><button class="btn" id="c-no">${esc(T('cancel'))}</button><button class="btn primary" id="c-yes" style="background:var(--bad);border-color:var(--bad)">${esc(okLabel)}</button></div>`,
@@ -197,23 +206,25 @@ function destroyCharts() { UI.charts.forEach(c => c.destroy()); UI.charts = []; 
 function render() {
   destroyCharts();
   const app = document.getElementById('app');
-  const screens = { budget: vBudget, overview: vOverview, evolution: vEvolution, transactions: vTransactions, review: vReview, settings: vSettings };
-  const headerTitle = UI.tab === 'settings' ? T('settings') : T(UI.tab);
+  const views = { overview: vOverview, evolution: vEvolution, budget: vBudget, transactions: vTransactions, review: vReview, settings: vSettings };
+  const v = views[UI.tab]();
   const rc = reviewCount();
+  const showGear = !['settings', 'review'].includes(UI.tab);
   app.innerHTML = `
-    <div class="app">
-      <header class="top">
-        ${UI.tab === 'settings' ? `<button class="icon-btn" data-tab="overview" aria-label="Back">${I.back}</button>` : ''}
-        <h1 style="flex:1">${esc(headerTitle)}</h1>
-        ${UI.tab !== 'settings' ? `<button class="icon-btn" data-tab="settings" aria-label="${esc(T('settings'))}">${I.gear}</button>` : ''}
-      </header>
-      <main id="screen">${screens[UI.tab]()}</main>
-    </div>
+    <header class="hero"><div class="hero-in">
+      <div class="hero-top">
+        ${v.back ? `<button class="hero-btn" data-tab="${v.back}" data-sub="${v.backSub || ''}" aria-label="Back">${I.back}</button>` : ''}
+        <h1>${esc(v.title || T(UI.tab))}</h1>
+        ${showGear ? `<button class="hero-btn" data-tab="settings" aria-label="${esc(T('settings'))}">${I.gear}</button>` : ''}
+      </div>
+      ${v.hero || ''}
+    </div></header>
+    <div class="app"><main id="screen">${v.body}</main></div>
     ${UI.tab === 'overview' ? `<button class="fab" id="fab-import" aria-label="${esc(T('importTitle'))}">＋</button>` : ''}
     <nav class="bottom"><div class="in">
-      ${['overview', 'evolution', 'budget', 'transactions', 'review'].map(k => `
-        <button data-tab="${k}" class="${UI.tab === k ? 'on' : ''}">${I[k]}<span>${esc(T(k))}</span>
-        ${k === 'review' && rc ? `<span class="badge">${rc > 99 ? '99+' : rc}</span>` : ''}</button>`).join('')}
+      ${['overview', 'evolution', 'budget', 'transactions'].map(k => `
+        <button data-tab="${k}" class="${UI.tab === k || (k === 'transactions' && UI.tab === 'review') ? 'on' : ''}">${I[k]}<span>${esc(T(k))}</span>
+        ${k === 'transactions' && rc ? `<span class="badge">${rc > 99 ? '99+' : rc}</span>` : ''}</button>`).join('')}
     </div></nav>`;
   const after = { budget: afterBudget, overview: afterOverview, evolution: afterEvolution, transactions: afterTransactions, review: afterReview, settings: afterSettings };
   after[UI.tab]?.();
@@ -221,7 +232,7 @@ function render() {
 
 document.addEventListener('click', e => {
   const tb = e.target.closest('[data-tab]');
-  if (tb) { UI.tab = tb.dataset.tab; render(); window.scrollTo(0, 0); return; }
+  if (tb) { UI.tab = tb.dataset.tab; UI.sub = tb.dataset.sub || null; render(); window.scrollTo(0, 0); return; }
   if (e.target.closest('#fab-import')) openImport();
 });
 
@@ -239,7 +250,7 @@ function overviewRows() {
   return { rows, head: headline(by, cm) };
 }
 function vOverview() {
-  if (!S.txs.length) return `<div class="card empty">${esc(T('noDataAtAll'))}</div>`;
+  if (!S.txs.length) return { hero: bigNum(T('spent'), fmt(0)), body: `<div class="card empty">${esc(T('noDataAtAll'))}</div>` };
   const { ptype, view } = S.settings;
   const { rows, head } = overviewRows();
   const pos = rows.filter(r => r.value > 0), totalPos = pos.reduce((a, r) => a + r.value, 0);
@@ -258,45 +269,38 @@ function vOverview() {
   } else {
     body = `<div class="chart-wrap" style="height:${Math.max(120, pos.length * 30 + 30)}px"><canvas id="c-bar" aria-label="Bar chart"></canvas></div>`;
   }
-  return `
-    ${acctSwitch()}
-    <div class="seg" id="ptype">${['week', 'twoWeeks', 'month'].map(k => {
-      const v = { week: 'week', twoWeeks: '2w', month: 'month' }[k];
-      return `<button data-v="${v}" class="${ptype === v ? 'on' : ''}">${esc(T(k))}</button>`; }).join('')}</div>
-    <div class="period">
-      <button class="icon-btn" id="p-prev" aria-label="Previous">${I.back}</button>
-      <div class="label">${esc(periodLabel(UI.period, ptype))}</div>
-      <button class="icon-btn" id="p-next" aria-label="Next">${I.fwd}</button>
-    </div>
-    <div class="kpis">
-      <div class="kpi main"><div class="k">${esc(T('spent'))}</div><div class="v">${fmt(head.spent)}</div></div>
-      <div class="kpi" data-goto="income"><div class="k">${esc(T('income'))}</div><div class="v">${fmt(head.income)}</div></div>
-      <div class="kpi"><div class="k" title="${esc(T('savedInvested'))}">${esc(T('savedInvested'))}</div><div class="v">${fmt(head.saved)}</div></div>
-    </div>
-    <div class="card">
-      <div class="row-between" style="margin-bottom:12px; flex-wrap:wrap">
-        <div class="seg" id="view" style="flex:1; min-width:220px">${['numbers', 'pie', 'bar'].map(v => `<button data-v="${v}" class="${view === v ? 'on' : ''}">${esc(T(v))}</button>`).join('')}</div>
-      </div>
-      <label class="toggle" style="margin-bottom:12px"><span class="switch"><input type="checkbox" id="show-sav" ${S.settings.showSavings ? 'checked' : ''}><span></span></span>${esc(T('showSavings'))}</label>
-      ${body}
-    </div>`;
+  return {
+    hero: ctxBar('ov', periodLabel(UI.period, ptype) + acctSuffix()) +
+      bigNum(T('spent'), fmt(head.spent), `${esc(T('income'))} <b>${fmt(head.income)}</b><span class="dot">·</span>${esc(T('savedShort'))} <b>${fmt(head.saved)}</b>`),
+    body: `<div class="toolbar">${segHtml('view', ['numbers', 'pie', 'bar'].map(v => [v, T(v)]), view)}</div>
+      <div class="card">${body}</div>`,
+  };
+}
+function openOverviewOptions() {
+  sheet(`<h2>${esc(T('viewOptions'))}</h2>
+    <div class="field"><span>${esc(T('periodOf'))}</span>${segHtml('o-ptype', [['week', T('week')], ['2w', T('twoWeeks')], ['month', T('month')]], S.settings.ptype)}</div>
+    ${ownAccts().length > 1 ? `<div class="field"><span>${esc(T('account'))}</span>${segHtml('o-acct', acctOpts(), curAcct())}</div>` : ''}
+    <label class="toggle"><span class="switch"><input type="checkbox" id="o-sav" ${S.settings.showSavings ? 'checked' : ''}><span></span></span>${esc(T('showSavings'))}</label>
+    <div class="actions"><button class="btn primary" id="o-done">${esc(T('done'))}</button></div>`,
+  (el, close) => {
+    bindSeg(el, 'o-ptype', v => { S.settings.ptype = v; UI.period = periodOf(v, UI.period.end < latestDate() ? UI.period.start : latestDate(), S.settings.anchor); saveSettings(); render(); });
+    bindSeg(el, 'o-acct', v => { S.settings.acct = v; saveSettings(); render(); });
+    el.querySelector('#o-sav').onchange = e => { S.settings.showSavings = e.target.checked; saveSettings(); render(); };
+    el.querySelector('#o-done').onclick = close;
+  });
 }
 function afterOverview() {
   if (!S.txs.length) return;
   const $ = id => document.getElementById(id);
-  bindAcctSwitch();
-  $('ptype').onclick = e => { const b = e.target.closest('button'); if (!b) return;
-    S.settings.ptype = b.dataset.v; UI.period = periodOf(b.dataset.v, UI.period.end < latestDate() ? UI.period.start : latestDate(), S.settings.anchor); saveSettings(); render(); };
-  $('p-prev').onclick = () => { UI.period = shiftPeriod(S.settings.ptype, UI.period, -1, S.settings.anchor); render(); };
-  $('p-next').onclick = () => { UI.period = shiftPeriod(S.settings.ptype, UI.period, 1, S.settings.anchor); render(); };
-  $('view').onclick = e => { const b = e.target.closest('button'); if (!b) return; S.settings.view = b.dataset.v; saveSettings(); render(); };
-  $('show-sav').onchange = e => { S.settings.showSavings = e.target.checked; saveSettings(); render(); };
+  $('ov').onclick = openOverviewOptions;
+  $('ov-prev').onclick = () => { UI.period = shiftPeriod(S.settings.ptype, UI.period, -1, S.settings.anchor); render(); };
+  $('ov-next').onclick = () => { UI.period = shiftPeriod(S.settings.ptype, UI.period, 1, S.settings.anchor); render(); };
+  bindSeg(document, 'view', v => { S.settings.view = v; saveSettings(); render(); });
   document.querySelectorAll('.cats li[data-cat]').forEach(li => li.onclick = () => gotoTx(li.dataset.cat));
-  document.querySelector('[data-goto=income]').onclick = () => gotoTx('income');
   const { rows } = overviewRows();
   const pos = rows.filter(r => r.value > 0);
   if (!pos.length) return;
-  const text2 = cssVar('--text-2'), grid = cssVar('--grid'), surface = cssVar('--surface');
+  const text2 = cssVar('--text-2'), surface = cssVar('--surface');
   Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
   Chart.defaults.color = text2;
   const tooltip = { callbacks: { label: c => ` ${fmt(c.raw)}` } };
@@ -306,14 +310,14 @@ function afterOverview() {
     if (rest.length) data.push({ id: '_other', label: T('other'), value: r2(rest.reduce((a, r) => a + r.value, 0)) });
     const colors = data.map((d, i) => d.id === '_other' ? cssVar('--other') : SERIES()[i]);
     const total = data.reduce((a, d) => a + d.value, 0);
+    const openSlice = d => d.id === '_other' ? openOther(rest, total) : gotoTx(d.id);
     UI.charts.push(new Chart($('c-pie'), {
       type: 'pie',
       data: { labels: data.map(d => d.label), datasets: [{ data: data.map(d => d.value), backgroundColor: colors, borderColor: surface, borderWidth: 2, hoverOffset: 6 }] },
       options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${fmt(c.raw)} · ${Math.round(c.raw / total * 100)}%` } } },
         onClick: (e, els) => { if (els[0]) openSlice(data[els[0].index]); } },
     }));
-    const openSlice = d => d.id === '_other' ? openOther(rest, total) : gotoTx(d.id);
-    $('pie-legend').innerHTML = data.map((d, i) => `<button class="leg" data-li="${i}"><i class="swatch" style="background:${colors[i]}"></i>${esc(d.label)}${d.id === '_other' ? ` <span class="faint">(${rest.length})</span>` : ''} <b class="num" style="color:var(--text)">${fmt(d.value)}</b> <span class="faint">${Math.round(d.value / total * 100)}%</span></button>`).join('');
+    $('pie-legend').innerHTML = data.map((d, i) => `<button class="leg" data-li="${i}"><i class="swatch" style="background:${colors[i]}"></i><span class="ellip">${esc(d.label)}${d.id === '_other' ? ` <span class="faint">(${rest.length})</span>` : ''}</span><b class="num">${fmt(d.value)}</b><span class="faint num">${Math.round(d.value / total * 100)}%</span></button>`).join('');
     $('pie-legend').querySelectorAll('[data-li]').forEach(b => b.onclick = () => openSlice(data[+b.dataset.li]));
   } else if (S.settings.view === 'bar') {
     UI.charts.push(new Chart($('c-bar'), {
@@ -321,14 +325,13 @@ function afterOverview() {
       data: { labels: pos.map(r => catName(r.id)), datasets: [{ data: pos.map(r => r.value), backgroundColor: cssVar('--accent'), borderRadius: 4, borderSkipped: 'start', barThickness: 18 }] },
       plugins: [{ id: 'vals', afterDatasetsDraw(ch) {
         const { ctx } = ch, meta = ch.getDatasetMeta(0);
-        ctx.save(); ctx.fillStyle = cssVar('--text'); ctx.font = '600 12px ' + Chart.defaults.font.family; ctx.textBaseline = 'middle';
+        ctx.save(); ctx.font = '600 12px ' + Chart.defaults.font.family; ctx.textBaseline = 'middle';
         meta.data.forEach((bar, i) => { const txt = fmt(pos[i].value); const w = ctx.measureText(txt).width;
           const inside = bar.x + 6 + w > ch.chartArea.right; ctx.fillStyle = inside ? '#fff' : cssVar('--text');
           ctx.textAlign = inside ? 'right' : 'left'; ctx.fillText(txt, inside ? bar.x - 6 : bar.x + 6, bar.y); });
         ctx.restore(); } }],
       options: { indexAxis: 'y', maintainAspectRatio: false, layout: { padding: { right: 8 } }, plugins: { legend: { display: false }, tooltip },
-        scales: { x: { display: false, grace: '22%' },
-          y: { grid: { display: false }, border: { display: false } } },
+        scales: { x: { display: false, grace: '22%' }, y: { grid: { display: false }, border: { display: false } } },
         onClick: (e, els) => { if (els[0]) gotoTx(pos[els[0].index].id); } },
     }));
   }
@@ -346,7 +349,7 @@ function openOther(rest, total) {
   });
 }
 function gotoTx(cat) {
-  UI.filter = { q: '', acct: viewTxs() === S.txs ? '' : S.settings.acct, cat, start: UI.period.start, end: UI.period.end };
+  UI.filter = { q: '', acct: curAcct(), cat, start: UI.period.start, end: UI.period.end };
   UI.tab = 'transactions'; render(); window.scrollTo(0, 0);
 }
 
@@ -361,48 +364,71 @@ function evoBuckets() {
   while (p.start <= end && out.length < 400) { out.push(p); p = shiftPeriod(step, p, 1, S.settings.anchor); }
   return out;
 }
-function vEvolution() {
-  if (!S.txs.length) return `<div class="card empty">${esc(T('noDataAtAll'))}</div>`;
-  const evo = S.settings.evo;
-  const pickable = sortCats(S.cats.filter(c => c.kind !== 'internal'));
-  return `${acctSwitch()}
-    <div class="card">
-      <div class="field"><span>${esc(T('step'))}</span><div class="seg" id="evo-step">${[['week', 'week'], ['2w', 'twoWeeks'], ['month', 'month']].map(([v, k]) => `<button data-v="${v}" class="${evo.step === v ? 'on' : ''}">${esc(T(k))}</button>`).join('')}</div></div>
-      <div class="field"><span>${esc(T('range'))}</span><div class="seg" id="evo-range">${['r3m', 'r6m', 'r1y', 'rall'].map(v => `<button data-v="${v}" class="${evo.range === v ? 'on' : ''}">${esc(T(v))}</button>`).join('')}</div></div>
-      <div class="chart-wrap" style="height:280px; margin-top:8px"><canvas id="c-evo" aria-label="Line chart"></canvas></div>
-      <div class="legend" id="evo-legend"></div>
-      <details><summary>${esc(T('numbers'))}</summary><div id="evo-table" style="overflow-x:auto"></div></details>
-    </div>
-    <div class="card">
-      <div class="small muted" style="margin-bottom:8px">${esc(T('pickCats'))}</div>
-      <div class="pick" id="evo-pick">
-        <label class="${evo.total !== false ? 'on' : ''}" style="flex-basis:100%; justify-content:center; font-weight:600"><input type="checkbox" value="_total" ${evo.total !== false ? 'checked' : ''}>${esc(T('total'))}</label>
-        ${pickable.map(c => `<label class="${evo.cats.includes(c.id) ? 'on' : ''}"><input type="checkbox" value="${c.id}" ${evo.cats.includes(c.id) ? 'checked' : ''}>${esc(catName(c.id))}</label>`).join('')}</div>
-    </div>`;
-}
-function afterEvolution() {
-  if (!S.txs.length) return;
-  const evo = S.settings.evo, $ = id => document.getElementById(id);
-  bindAcctSwitch();
-  const seg = (id, key) => $(id).onclick = e => { const b = e.target.closest('button'); if (!b) return; evo[key] = b.dataset.v; saveSettings(); render(); };
-  seg('evo-step', 'step'); seg('evo-range', 'range');
-  $('evo-pick').onchange = e => {
-    const v = e.target.value;
-    if (v === '_total') { evo.total = e.target.checked; saveSettings(); render(); return; }
-    if (e.target.checked) { if (evo.cats.length >= 4) { e.target.checked = false; toast(T('pickCats')); return; } evo.cats.push(v); }
-    else evo.cats = evo.cats.filter(c => c !== v);
-    saveSettings(); render();
-  };
-  const buckets = evoBuckets(), cm = catMap();
+function evoData() {
+  const evo = S.settings.evo, buckets = evoBuckets(), cm = catMap();
   const sums = buckets.map(p => totals(viewTxs(), p.start, p.end));
-  // Colours stay fixed: Total always uses the first colour, chosen categories the next ones
+  const totalsSpent = sums.map(by => headline(by, cm).spent);
   const colors = SERIES(), series = [];
-  if (evo.total !== false) series.push({ label: T('total'), data: sums.map(by => headline(by, cm).spent), color: colors[0] });
+  // Colours stay fixed: Total always uses the first colour, chosen categories the next ones
+  if (evo.total !== false) series.push({ label: T('total'), data: totalsSpent, color: colors[0] });
   for (const id of evo.cats) {
     const k = cm[id]?.kind;
     series.push({ label: catName(id), data: sums.map(by => r2((k === 'income' ? 1 : -1) * (by[id] || 0))), color: colors[1 + evo.cats.indexOf(id)] });
   }
-  const labels = buckets.map(p => S.settings.evo.step === 'month'
+  return { buckets, series, totalsSpent };
+}
+const stepLabel = s => T({ week: 'weekly', '2w': 'biweekly', month: 'monthlyStep' }[s]);
+function vEvolution() {
+  if (!S.txs.length) return { hero: '', body: `<div class="card empty">${esc(T('noDataAtAll'))}</div>` };
+  const evo = S.settings.evo, { buckets, totalsSpent } = evoData();
+  const avg = totalsSpent.length ? r2(totalsSpent.reduce((a, v) => a + v, 0) / totalsSpent.length) : 0;
+  const maxI = totalsSpent.indexOf(Math.max(...totalsSpent));
+  const pickable = sortCats(S.cats.filter(c => c.kind !== 'internal'));
+  return {
+    hero: ctxBar('ev', `${stepLabel(evo.step)} · ${T(evo.range)}${acctSuffix()}`, { arrows: false }) +
+      bigNum(T('avgSpent')(evo.step), fmt(avg), maxI >= 0 ? `${esc(T('highest'))}: ${esc(periodLabel(buckets[maxI], evo.step))} <b>${fmt(totalsSpent[maxI])}</b>` : ''),
+    body: `
+    <div class="card">
+      <div class="chart-wrap" style="height:260px"><canvas id="c-evo" aria-label="Line chart"></canvas></div>
+      <div class="legend" id="evo-legend"></div>
+    </div>
+    <div class="section-title">${esc(T('showInGraph'))}</div>
+    <div class="card">
+      <div class="pick" id="evo-pick">
+        <label class="${evo.total !== false ? 'on' : ''} pin"><input type="checkbox" value="_total" ${evo.total !== false ? 'checked' : ''}>${esc(T('total'))}</label>
+        ${pickable.map(c => `<label class="${evo.cats.includes(c.id) ? 'on' : ''}"><input type="checkbox" value="${c.id}" ${evo.cats.includes(c.id) ? 'checked' : ''}>${esc(catName(c.id))}</label>`).join('')}</div>
+      <div class="small faint" style="margin-top:10px">${esc(T('maxFour'))}</div>
+    </div>
+    <details class="card"><summary>${esc(T('showNumbers'))}</summary><div id="evo-table" style="overflow-x:auto; margin-top:8px"></div></details>`,
+  };
+}
+function openEvoOptions() {
+  const evo = S.settings.evo;
+  sheet(`<h2>${esc(T('viewOptions'))}</h2>
+    <div class="field"><span>${esc(T('step'))}</span>${segHtml('e-step', [['week', T('week')], ['2w', T('twoWeeks')], ['month', T('month')]], evo.step)}</div>
+    <div class="field"><span>${esc(T('range'))}</span>${segHtml('e-range', ['r3m', 'r6m', 'r1y', 'rall'].map(v => [v, T(v)]), evo.range)}</div>
+    ${ownAccts().length > 1 ? `<div class="field"><span>${esc(T('account'))}</span>${segHtml('e-acct', acctOpts(), curAcct())}</div>` : ''}
+    <div class="actions"><button class="btn primary" id="e-done">${esc(T('done'))}</button></div>`,
+  (el, close) => {
+    bindSeg(el, 'e-step', v => { evo.step = v; saveSettings(); render(); });
+    bindSeg(el, 'e-range', v => { evo.range = v; saveSettings(); render(); });
+    bindSeg(el, 'e-acct', v => { S.settings.acct = v; saveSettings(); render(); });
+    el.querySelector('#e-done').onclick = close;
+  });
+}
+function afterEvolution() {
+  if (!S.txs.length) return;
+  const evo = S.settings.evo, $ = id => document.getElementById(id);
+  $('ev').onclick = openEvoOptions;
+  $('evo-pick').onchange = e => {
+    const v = e.target.value;
+    if (v === '_total') { evo.total = e.target.checked; saveSettings(); render(); return; }
+    if (e.target.checked) { if (evo.cats.length >= 4) { e.target.checked = false; toast(T('maxFour')); return; } evo.cats.push(v); }
+    else evo.cats = evo.cats.filter(c => c !== v);
+    saveSettings(); render();
+  };
+  const { buckets, series } = evoData();
+  const labels = buckets.map(p => evo.step === 'month'
     ? parseISO(p.start).toLocaleDateString(LOC(), { month: 'short', year: '2-digit' })
     : parseISO(p.start).toLocaleDateString(LOC(), { day: 'numeric', month: 'short' }));
   Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
@@ -441,39 +467,61 @@ function txRow(t) {
   const catLabel = !t.cat ? T('uncategorized') : t.split ? `${catName(ps[0].cat)} +${ps.length - 1}` : catName(t.cat);
   return `<div class="tx" data-id="${t.id}">
     <div class="m">${esc(title(shortMerchant(t.merchant)))}</div>
-    <div class="a">${fmt(t.amount, t.amount > 0)}</div>
-    <div class="s">${esc(fmtDate(t.date, { day: 'numeric', month: 'short' }))} · ${esc(title(t.type))}</div>
+    <div class="a ${t.amount > 0 ? 'pos' : ''}">${fmt(t.amount, t.amount > 0)}</div>
+    <div class="s">${esc(fmtDate(t.date, { day: 'numeric', month: 'short' }))}</div>
     <div class="c ${t.cat ? '' : 'none'}">${esc(catLabel)}</div></div>`;
 }
+function filterLabel() {
+  const f = UI.filter, bits = [];
+  bits.push(f.acct ? accName(f.acct) : T('allAccts'));
+  bits.push(f.cat ? catName(f.cat === '_none' ? null : f.cat) : T('allCategories'));
+  if (f.start) bits.push(`${fmtDate(f.start, { day: 'numeric', month: 'short' })} – ${fmtDate(f.end || f.start, { day: 'numeric', month: 'short' })}`);
+  return bits.join(' · ');
+}
 function vTransactions() {
-  const f = UI.filter, list = filtered();
-  const ownAccts = [...new Set(S.txs.map(t => t.acct))];
+  const f = UI.filter, list = filtered(), rc = reviewCount();
   const groups = {};
   for (const t of list.slice(0, 600)) { const k = t.date.slice(0, 7); (groups[k] ||= []).push(t); }
   const sum = r2(list.reduce((a, t) => a + (f.cat ? parts(t).filter(p => p.cat === f.cat || (f.cat === '_none' && !p.cat)).reduce((x, p) => x + p.amount, 0) : t.amount), 0));
-  return `
-    <div class="filters">
-      <input type="search" class="full" id="f-q" placeholder="${esc(T('search'))}" value="${esc(f.q)}">
-      <select id="f-acct"><option value="">${esc(T('allAccounts'))}</option>${ownAccts.map(a => `<option value="${a}" ${f.acct === a ? 'selected' : ''}>${esc(accName(a))}</option>`).join('')}</select>
-      <select id="f-cat"><option value="">${esc(T('allCategories'))}</option><option value="_none" ${f.cat === '_none' ? 'selected' : ''}>${esc(T('uncategorized'))}</option>${catOptions(f.cat)}</select>
-    </div>
-    ${f.start ? `<span class="chip">${esc(fmtDate(f.start))} – ${esc(fmtDate(f.end))}<button id="f-clear-p" aria-label="${esc(T('clear'))}">×</button></span>` : ''}
-    <div class="row-between small muted" style="margin:4px 2px 0"><span>${esc(T('results')(list.length))}</span><span class="num">${fmt(sum, sum > 0)}</span></div>
+  const active = f.acct || f.cat || f.start;
+  return {
+    hero: `<div class="hero-search"><input type="search" id="f-q" placeholder="${esc(T('search'))}" value="${esc(f.q)}"></div>` +
+      `<div class="ctx">${`<button class="ctx-chip" id="tx-f">${esc(filterLabel())} <span class="caret">▾</span></button>`}${active ? `<button class="ctx-arrow" id="tx-clear" aria-label="${esc(T('clearFilters'))}">${I.x}</button>` : ''}</div>`,
+    body: `
+    ${rc ? `<button class="banner" data-tab="review"><span><b>${esc(T('toReviewBanner')(rc))}</b><br><span class="small">${esc(T('reviewSub'))}</span></span>${I.fwd}</button>` : ''}
+    <div class="row-between small muted" style="margin:2px 4px 0"><span>${esc(T('results')(list.length))}</span><span class="num">${fmt(sum, sum > 0)}</span></div>
     ${Object.entries(groups).map(([k, ts]) => `
       <div class="tx-group">${esc(parseISO(k + '-01').toLocaleDateString(LOC(), { month: 'long', year: 'numeric' }))}</div>
       <div class="txlist">${ts.map(txRow).join('')}</div>`).join('')}
-    ${!list.length ? `<div class="empty">${esc(T('noData'))}</div>` : ''}`;
+    ${!list.length ? `<div class="empty">${esc(T('noData'))}</div>` : ''}`,
+  };
+}
+function openTxFilters() {
+  const f = UI.filter;
+  sheet(`<h2>${esc(T('filters'))}</h2>
+    ${ownAccts().length > 1 ? `<div class="field"><span>${esc(T('account'))}</span>${segHtml('tf-acct', acctOpts(), f.acct)}</div>` : ''}
+    <label class="field"><span>${esc(T('category'))}</span><select id="tf-cat"><option value="">${esc(T('allCategories'))}</option><option value="_none" ${f.cat === '_none' ? 'selected' : ''}>${esc(T('uncategorized'))}</option>${catOptions(f.cat)}</select></label>
+    <div class="field"><span>${esc(T('periodOf'))}</span><div style="display:grid; grid-template-columns:1fr 1fr; gap:6px">
+      <input type="date" id="tf-from" value="${f.start}" aria-label="${esc(T('from'))}"><input type="date" id="tf-to" value="${f.end}" aria-label="${esc(T('to'))}"></div></div>
+    <div class="actions"><button class="btn" id="tf-clear" style="margin-right:auto">${esc(T('clearFilters'))}</button><button class="btn primary" id="tf-done">${esc(T('done'))}</button></div>`,
+  (el, close) => {
+    const q = x => el.querySelector(x);
+    bindSeg(el, 'tf-acct', v => { f.acct = v; render(); });
+    q('#tf-cat').onchange = e => { f.cat = e.target.value; render(); };
+    q('#tf-from').onchange = e => { f.start = e.target.value; if (f.start && !f.end) f.end = latestDate(); render(); };
+    q('#tf-to').onchange = e => { f.end = e.target.value; if (f.end && !f.start) f.start = earliestDate(); render(); };
+    q('#tf-clear').onclick = () => { UI.filter = { q: f.q, acct: '', cat: '', start: '', end: '' }; close(); render(); };
+    q('#tf-done').onclick = close;
+  });
 }
 function afterTransactions() {
   const $ = id => document.getElementById(id);
   let tm;
   $('f-q').oninput = e => { clearTimeout(tm); tm = setTimeout(() => { UI.filter.q = e.target.value; const pos = e.target.selectionStart; render(); const q = $('f-q'); q.focus(); q.setSelectionRange(pos, pos); }, 250); };
-  $('f-acct').onchange = e => { UI.filter.acct = e.target.value; render(); };
-  $('f-cat').onchange = e => { UI.filter.cat = e.target.value; render(); };
-  $('f-clear-p') && ($('f-clear-p').onclick = () => { UI.filter.start = UI.filter.end = ''; render(); });
+  $('tx-f').onclick = openTxFilters;
+  $('tx-clear') && ($('tx-clear').onclick = () => { UI.filter = { q: UI.filter.q, acct: '', cat: '', start: '', end: '' }; render(); });
   document.querySelectorAll('.tx[data-id]').forEach(el => el.onclick = () => openEdit(S.txs.find(t => t.id === el.dataset.id)));
 }
-
 // ---------------- Edit sheet ----------------
 function sheet(html, onMount) {
   const scrim = document.createElement('div'); scrim.className = 'scrim';
@@ -550,41 +598,38 @@ function openEdit(t) {
   });
 }
 
-// ---------------- Review ----------------
+// ---------------- Review (opened from Transactions) ----------------
 function vReview() {
   const list = S.txs.filter(t => !t.cat).sort((a, b) => b.date.localeCompare(a.date));
-  if (!list.length) return `<div class="card empty">${esc(T('reviewEmpty'))}</div>`;
-  return `<p class="muted small" style="margin-top:0">${esc(T('reviewIntro')(list.length))}</p>` + list.slice(0, 100).map(t => `
+  const base = { title: T('review'), back: 'transactions', hero: bigNum(T('toCategorize'), String(list.length), esc(T('reviewSub'))) };
+  if (!list.length) return { ...base, body: `<div class="card empty">${esc(T('reviewEmpty'))}</div>` };
+  return { ...base, body: list.slice(0, 100).map(t => `
     <div class="card review-item" data-id="${t.id}">
       <div class="top"><div style="min-width:0"><div class="ellip" style="font-weight:600">${esc(title(shortMerchant(t.merchant)))}</div>
-        <div class="small faint">${esc(fmtDate(t.date))} · ${esc(title(t.type))}</div></div>
-        <b class="num">${fmt(t.amount, t.amount > 0)}</b></div>
-      ${t.description && t.description !== t.merchant ? `<div class="small muted ellip" style="margin-bottom:8px">${esc(t.description)}</div>` : ''}
-      <select data-k="cat">${catOptions(null, { placeholder: T('chooseCat') })}</select>
-      <label class="toggle small" style="margin:10px 0 6px"><span class="switch"><input type="checkbox" data-k="rem" checked><span></span></span>${esc(T('remember'))}</label>
-      <div class="row-between" style="gap:8px"><input type="text" data-k="pat" value="${esc(suggestPattern(t))}" aria-label="${esc(T('matchText'))}">
+        <div class="small faint">${esc(fmtDate(t.date))} · ${esc(accName(t.acct))}</div></div>
+        <b class="num ${t.amount > 0 ? 'pos' : ''}">${fmt(t.amount, t.amount > 0)}</b></div>
+      <div class="review-row"><select data-k="cat" aria-label="${esc(T('category'))}">${catOptions(null, { placeholder: T('chooseCat') })}</select>
         <button class="btn primary" data-k="save">${esc(T('save'))}</button></div>
-      <button class="btn" data-k="more" style="margin-top:8px; font-size:13px; padding:6px 10px">${esc(T('splitIt'))} / …</button>
-    </div>`).join('');
+      <div class="row-between small" style="margin-top:8px">
+        <label class="toggle small"><span class="switch"><input type="checkbox" data-k="rem" checked><span></span></span>${esc(T('rememberShort'))}</label>
+        <button class="link" data-k="more">${esc(T('moreOptions'))}</button></div>
+    </div>`).join('') };
 }
 function afterReview() {
   document.querySelectorAll('.review-item').forEach(card => {
     const t = S.txs.find(x => x.id === card.dataset.id), q = s => card.querySelector(s);
-    q('[data-k=rem]').onchange = e => { q('[data-k=pat]').disabled = !e.target.checked; };
     q('[data-k=more]').onclick = () => openEdit(t);
     q('[data-k=save]').onclick = async () => {
       const cat = q('[data-k=cat]').value;
       if (!cat) { q('[data-k=cat]').focus(); return; }
-      const remember = q('[data-k=rem]').checked;
       const before = reviewCount();
-      await commitCategory(t, { cat, split: null, remember, pattern: q('[data-k=pat]').value });
+      await commitCategory(t, { cat, split: null, remember: q('[data-k=rem]').checked, pattern: suggestPattern(t) });
       const solved = before - reviewCount();
       if (solved > 1) toast(T('reapplied')(solved));
       render();
     };
   });
 }
-
 // ---------------- Import ----------------
 function buildTx(parsed, pdfId, bank) {
   const acct = parsed.iban.replace(/ /g, '');
@@ -668,19 +713,31 @@ function openImport() {
   });
 }
 
-// ---------------- Settings ----------------
+// ---------------- Settings (menu + sub-pages) ----------------
+const SETTINGS_PAGES = ['accounts', 'categories', 'rules', 'statements', 'periods', 'backup'];
 function vSettings() {
-  const st = S.settings, L = S.settings.lang;
+  const st = S.settings, L = S.settings.lang, sub = SETTINGS_PAGES.includes(UI.sub) ? UI.sub : null;
+  if (!sub) {
+    const counts = { accounts: S.accounts.length, categories: S.cats.filter(c => c.kind !== 'internal').length, rules: S.rules.length, statements: S.pdfs.length };
+    const pageTitle = { accounts: 'accounts', categories: 'categories', rules: 'rules', statements: 'statements', periods: 'periods', backup: 'backupData' };
+    return { title: T('settings'), back: 'overview', body: `
+      <div class="section-title">${esc(T('appearance'))}</div>
+      <div class="card">
+        <div class="field"><span>${esc(T('language'))}</span>${segHtml('s-lang', [['en', 'English'], ['nl', 'Nederlands']], st.lang)}</div>
+        <div class="field" style="margin-bottom:0"><span>${esc(T('theme'))}</span>${segHtml('s-theme', ['light', 'dark', 'system'].map(v => [v, T(v)]), st.theme)}</div>
+      </div>
+      <div class="section-title">${esc(T('yourData'))}</div>
+      <div class="card nav-list">${SETTINGS_PAGES.map(p => `
+        <button class="nav-row" data-tab="settings" data-sub="${p}"><span>${esc(T(pageTitle[p]))}</span>
+          <span class="faint">${counts[p] != null ? counts[p] : ''} ${I.fwd}</span></button>`).join('')}
+      </div>
+      <p class="small faint" style="text-align:center; margin-top:18px">Cashew · v1.1</p>` };
+  }
+  const page = (t, body) => ({ title: T(t), back: 'settings', backSub: '', body });
   const roleOpt = r => ['own', 'savings', 'investment'].map(v => `<option value="${v}" ${r === v ? 'selected' : ''}>${esc(T({ own: 'roleOwn', savings: 'roleSavings', investment: 'roleInvest' }[v]))}</option>`).join('');
   const kindOpt = k => ['expense', 'income', 'savings', 'investment'].map(v => `<option value="${v}" ${k === v ? 'selected' : ''}>${esc(T({ expense: 'kindExpense', income: 'kindIncome', savings: 'kindSavings', investment: 'kindInvest' }[v]))}</option>`).join('');
-  return `
-    <div class="card">
-      <div class="field"><span>${esc(T('language'))}</span><div class="seg" id="s-lang">${[['en', 'English'], ['nl', 'Nederlands']].map(([v, l]) => `<button data-v="${v}" class="${st.lang === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
-      <div class="field"><span>${esc(T('theme'))}</span><div class="seg" id="s-theme">${['light', 'dark', 'system'].map(v => `<button data-v="${v}" class="${st.theme === v ? 'on' : ''}">${esc(T(v))}</button>`).join('')}</div></div>
-      <label class="field" style="margin-bottom:0"><span>${esc(T('twoWeekStart'))}</span><input type="date" id="s-anchor" value="${st.anchor}"></label>
-    </div>
-
-    <div class="section-title">${esc(T('accounts'))}</div>
+  if (sub === 'accounts') return page('accounts', `
+    <p class="small muted">${esc(T('accountsHelp'))}</p>
     <div class="card">${S.accounts.map((a, i) => `
       <div class="list-row" data-i="${i}" style="flex-wrap:wrap">
         <input type="text" data-k="name" value="${esc(a.name)}" style="flex:1 1 140px" aria-label="${esc(T('name'))}">
@@ -690,19 +747,18 @@ function vSettings() {
       <details><summary>${esc(T('addAccount'))}</summary>
         <div style="display:grid; gap:6px; margin-top:8px"><input type="text" id="na-iban" placeholder="${esc(T('iban'))}"><input type="text" id="na-name" placeholder="${esc(T('name'))}">
         <select id="na-role">${roleOpt('own')}</select><button class="btn" id="na-add">${esc(T('addAccount'))}</button></div></details>
-    </div>
-
-    <div class="section-title">${esc(T('categories'))}</div>
+    </div>`);
+  if (sub === 'categories') return page('categories', `
     <div class="card">${sortCats(S.cats.filter(c => c.kind !== 'internal')).map(c => `
       <div class="list-row" data-cid="${c.id}">
         <input type="text" data-k="name" value="${esc(c[L] || c.en)}" class="grow" aria-label="${esc(T('name'))}">
         <select data-k="kind" style="width:130px">${kindOpt(c.kind)}</select>
         <button class="icon-btn" data-k="del" aria-label="${esc(T('del'))}">${I.x}</button>
       </div>`).join('')}
-      <div style="display:flex; gap:6px; margin-top:10px"><input type="text" id="nc-name" placeholder="${esc(T('newCategory'))}"><button class="btn" id="nc-add">${esc(T('addCategory'))}</button></div>
-    </div>
-
-    <div class="section-title">${esc(T('rules'))} <span class="faint">(${S.rules.length})</span></div>
+      <div style="display:flex; gap:6px; margin-top:10px"><input type="text" id="nc-name" placeholder="${esc(T('newCategory'))}"><button class="btn" id="nc-add">${esc(T('add'))}</button></div>
+    </div>`);
+  if (sub === 'rules') return page('rules', `
+    <p class="small muted">${esc(T('rulesHelp'))}</p>
     <div class="card">
       <input type="search" id="r-q" placeholder="${esc(T('search'))}" style="margin-bottom:6px">
       <div id="r-list"></div>
@@ -712,27 +768,27 @@ function vSettings() {
           <input type="number" step="0.01" id="nr-amt" placeholder="${esc(T('ruleAmount'))}">
           <select id="nr-cat">${catOptions(null, { placeholder: T('chooseCat') })}</select>
           <button class="btn" id="nr-add">${esc(T('addRule'))}</button></div></details>
-      <button class="btn block" id="r-reapply" style="margin-top:12px">${esc(T('reapply'))}</button>
     </div>
-
-    <div class="section-title">${esc(T('statements'))}</div>
-    <div class="card">${S.pdfs.length ? S.pdfs.sort((a, b) => b.to.localeCompare(a.to)).map(p => `
-      <div class="list-row"><div class="grow"><div class="ellip small" style="font-weight:500">${esc(p.name)}</div>
-        <div class="small faint">${esc(accName(p.iban))} · ${esc(fmtDate(p.from))} – ${esc(fmtDate(p.to))}</div></div>
+    <button class="btn block" id="r-reapply">${esc(T('reapply'))}</button>`);
+  if (sub === 'statements') return page('statements', `
+    <div class="card">${S.pdfs.length ? [...S.pdfs].sort((a, b) => b.to.localeCompare(a.to)).map(p => `
+      <div class="list-row"><div class="grow"><div class="ellip small" style="font-weight:500">${esc(accName(p.iban))}</div>
+        <div class="small faint">${esc(fmtDate(p.from))} – ${esc(fmtDate(p.to))}</div></div>
         <button class="btn" data-open="${p.id}">${esc(T('open'))}</button>
         <button class="icon-btn" data-delpdf="${p.id}" aria-label="${esc(T('del'))}">${I.x}</button></div>`).join('') : `<div class="muted small">${esc(T('noStatements'))}</div>`}
-    </div>
-
-    <div class="section-title">${esc(T('backup'))}</div>
+    </div>`);
+  if (sub === 'periods') return page('periods', `
+    <div class="card"><label class="field" style="margin-bottom:0"><span>${esc(T('twoWeekStart'))}</span><input type="date" id="s-anchor" value="${st.anchor}"></label></div>`);
+  return page('backupData', `
     <div class="card">
-      <label class="toggle small" style="margin-bottom:10px"><span class="switch"><input type="checkbox" id="b-pdfs" checked><span></span></span>${esc(T('withPdfs'))}</label>
+      <p class="small muted" style="margin-top:0">${esc(T('backupHelp'))}</p>
+      <label class="toggle small" style="margin-bottom:12px"><span class="switch"><input type="checkbox" id="b-pdfs" checked><span></span></span>${esc(T('withPdfs'))}</label>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px">
         <button class="btn" id="b-export">${esc(T('exportData'))}</button>
         <label class="btn" style="text-align:center">${esc(T('importData'))}<input type="file" id="b-import" accept="application/json,.json" hidden></label>
       </div>
-      <button class="btn block danger" id="b-reset" style="margin-top:12px">${esc(T('resetAll'))}</button>
     </div>
-    <p class="small faint" style="text-align:center">Cashew · v1.0</p>`;
+    <div class="card"><button class="btn block danger" id="b-reset">${esc(T('resetAll'))}</button></div>`);
 }
 function drawRules() {
   const q = (document.getElementById('r-q')?.value || '').toUpperCase();
@@ -748,15 +804,15 @@ function drawRules() {
 }
 function afterSettings() {
   const $ = id => document.getElementById(id), st = S.settings;
-  $('s-lang').onclick = e => { const b = e.target.closest('button'); if (!b) return; st.lang = b.dataset.v; saveSettings(); applyTheme(); render(); };
-  $('s-theme').onclick = e => { const b = e.target.closest('button'); if (!b) return; st.theme = b.dataset.v; saveSettings(); applyTheme(); render(); };
-  $('s-anchor').onchange = e => { if (e.target.value) { st.anchor = e.target.value; saveSettings(); UI.period = periodOf(st.ptype, UI.period.start, st.anchor); } };
+  bindSeg(document, 's-lang', v => { st.lang = v; saveSettings(); applyTheme(); render(); });
+  bindSeg(document, 's-theme', v => { st.theme = v; saveSettings(); applyTheme(); render(); });
+  if ($('s-anchor')) $('s-anchor').onchange = e => { if (e.target.value) { st.anchor = e.target.value; saveSettings(); UI.period = periodOf(st.ptype, UI.period.start, st.anchor); } };
   document.querySelectorAll('[data-i]').forEach(row => {
     const a = S.accounts[+row.dataset.i];
     row.querySelector('[data-k=name]').onchange = e => { a.name = e.target.value; db.set('accounts', S.accounts); };
     row.querySelector('[data-k=role]').onchange = async e => { a.role = e.target.value; await db.set('accounts', S.accounts); const n = await reapplyAll(); toast(T('reapplied')(n)); };
   });
-  $('na-add').onclick = async () => {
+  if ($('na-add')) $('na-add').onclick = async () => {
     const iban = $('na-iban').value.replace(/\s/g, '').toUpperCase(); if (!/^[A-Z]{2}\d{2}[A-Z0-9]{8,30}$/.test(iban)) { $('na-iban').focus(); return; }
     S.accounts.push({ iban, name: $('na-name').value || fmtIban(iban), role: $('na-role').value });
     await db.set('accounts', S.accounts); await reapplyAll(); render();
@@ -771,20 +827,20 @@ function afterSettings() {
       S.cats = S.cats.filter(x => x !== c); db.set('cats', S.cats); render();
     };
   });
-  $('nc-add').onclick = () => {
+  if ($('nc-add')) $('nc-add').onclick = () => {
     const name = $('nc-name').value.trim(); if (!name) return;
     S.cats.splice(S.cats.findIndex(c => c.kind !== 'expense'), 0, { id: 'c' + uid(), en: name, nl: name, kind: 'expense' });
     db.set('cats', S.cats); render();
   };
-  $('r-q').oninput = drawRules; drawRules();
-  $('nr-add').onclick = async () => {
+  if ($('r-q')) { $('r-q').oninput = drawRules; drawRules(); }
+  if ($('nr-add')) $('nr-add').onclick = async () => {
     const pattern = $('nr-pat').value.trim().toUpperCase(), cat = $('nr-cat').value;
     if (!pattern || !cat) return;
     const amt = $('nr-amt').value;
     S.rules.unshift({ id: uid(), pattern, cat, ...(amt !== '' ? { amount: r2(+amt) } : {}) });
     await db.set('rules', S.rules); const n = await reapplyAll(); toast(T('reapplied')(n)); render();
   };
-  $('r-reapply').onclick = async () => { const n = await reapplyAll(); toast(T('reapplied')(n)); };
+  if ($('r-reapply')) $('r-reapply').onclick = async () => { const n = await reapplyAll(); toast(T('reapplied')(n)); };
   document.querySelectorAll('[data-open]').forEach(b => b.onclick = async () => {
     const p = await db.getPdf(b.dataset.open); if (!p) return;
     try { await openPdf(p.name, p.blob); } catch (err) { toast('⚠ ' + err.message); }
@@ -792,7 +848,7 @@ function afterSettings() {
   document.querySelectorAll('[data-delpdf]').forEach(b => b.onclick = async () => {
     await db.delPdf(b.dataset.delpdf); S.pdfs = await db.allPdfMeta(); render();
   });
-  $('b-export').onclick = async () => {
+  if ($('b-export')) $('b-export').onclick = async () => {
     const data = { app: 'expense-tracker', version: 1, exported: new Date().toISOString(), settings: S.settings, cats: S.cats, accounts: S.accounts, rules: S.rules, budget: S.budget, txs: S.txs, pdfs: [] };
     if ($('b-pdfs').checked) for (const p of await db.allPdfs()) {
       const b64 = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result.split(',')[1]); fr.readAsDataURL(p.blob); });
@@ -801,7 +857,7 @@ function afterSettings() {
     try { await saveFile(`cashew-backup-${iso(new Date())}.json`, new Blob([JSON.stringify(data)], { type: 'application/json' })); }
     catch (err) { if (!/cancel/i.test(err.message)) toast('⚠ ' + err.message); }
   };
-  $('b-import').onchange = async e => {
+  if ($('b-import')) $('b-import').onchange = async e => {
     const f = e.target.files[0]; if (!f) return;
     try {
       const data = JSON.parse(await f.text());
@@ -818,12 +874,11 @@ function afterSettings() {
       UI.period = periodOf(S.settings.ptype, latestDate(), S.settings.anchor); render();
     } catch (err) { toast('⚠ ' + err.message); }
   };
-  $('b-reset').onclick = async () => {
+  if ($('b-reset')) $('b-reset').onclick = async () => {
     if (!(await confirmSheet(T('resetConfirm'), T('resetAll')))) return;
     await db.clearAll(); location.reload();
   };
 }
-
 // ---------------- Budget ----------------
 const FREQ_DIV = { monthly: 1, quarterly: 3, yearly: 12 };
 const monthly = f => r2(f.amount / FREQ_DIV[f.freq || 'monthly']);
@@ -867,53 +922,58 @@ function recurringSuggestions(m) {
   }).sort((a, b) => b.amount - a.amount).slice(0, 8);
 }
 function vBudget() {
-  const m = budgetMonth(), b = budgetNumbers(m), cm = catMap();
+  const m = budgetMonth(), b = budgetNumbers(m);
   const prevLabel = periodLabel(b.prev, 'month');
   const pct = b.free > 0 ? Math.min(100, b.flex / b.free * 100) : 100;
   const sugg = recurringSuggestions(m);
   const freqLabel = f => T('freq_' + (f.freq || 'monthly'));
-  return `
-    <div class="period">
-      <button class="icon-btn" id="b-prev" aria-label="Previous">${I.back}</button>
-      <div class="label">${esc(periodLabel(m, 'month'))}</div>
-      <button class="icon-btn" id="b-next" aria-label="Next">${I.fwd}</button>
+  const over = b.left < 0;
+  return {
+    hero: ctxBar('bu', periodLabel(m, 'month'), { tappable: false }) +
+      bigNum(over ? T('overBudget') : T('stillAvailable'), fmt(Math.abs(b.left)),
+        `${fmt(b.flex)} ${esc(T('spentOf'))} ${fmt(b.free)}`,
+        `<div class="hero-meter ${over ? 'over' : ''}"><i style="width:${pct}%"></i></div>`),
+    body: `
+    <div class="section-title">${esc(T('monthlyBudget'))}</div>
+    <div class="card calc">
+      <button class="bline" id="b-income"><span>${esc(T('income'))}<span class="sub">${esc(b.edited != null ? T('editedByYou') : T('fromStatements')(prevLabel))}</span></span><span class="num">${fmt(b.income)} <span class="edit-ic">✎</span></span></button>
+      <div class="bline"><span>− ${esc(T('fixedCosts'))}</span><span class="num">${fmt(b.fixedTotal)}</span></div>
+      <button class="bline" id="b-goal"><span>− ${esc(T('savingsGoal'))}</span><span class="num">${fmt(b.goal)} <span class="edit-ic">✎</span></span></button>
+      <div class="bline total"><span>= ${esc(T('freeTotal'))}</span><span class="num">${fmt(b.free)}</span></div>
+      <div class="small faint" style="margin-top:8px">${esc(T('flexExplain'))}</div>
     </div>
-    <div class="card">
-      <div class="row-between"><span class="muted">${esc(T('freeToSpend'))}</span></div>
-      <div class="num" style="font-size:32px; font-weight:700; letter-spacing:-.02em; margin:2px 0 12px; ${b.free < 0 ? 'color:var(--bad)' : ''}">${fmt(b.free)}</div>
-      <div class="bline" id="b-income"><span>${esc(T('income'))} <span class="faint small">· ${esc(b.edited != null ? T('editedByYou') : T('fromStatements')(prevLabel))}</span> <span class="edit-ic">✎</span></span><b class="num">${fmt(b.income)}</b></div>
-      <div class="bline"><span>− ${esc(T('fixedCosts'))}</span><b class="num">${fmt(b.fixedTotal)}</b></div>
-      <div class="bline" id="b-goal"><span>− ${esc(T('savingsGoal'))} <span class="edit-ic">✎</span></span><b class="num">${fmt(b.goal)}</b></div>
+    <div class="section-title row-between"><span>${esc(T('fixedCosts'))}</span><span class="faint" style="text-transform:none; letter-spacing:0">${fmt(b.fixedTotal)} ${esc(T('perMonth'))}</span></div>
+    <div class="card" style="padding-top:4px; padding-bottom:8px">
+      ${S.budget.fixed.length ? `<ul class="cats">${[...S.budget.fixed].sort((x, y) => monthly(y) - monthly(x)).map(f => `
+        <li data-fx="${f.id}"><span class="cn ellip">${esc(f.name)}</span><span class="cv">${fmt(monthly(f))}</span>
+          <span class="small faint ellip">${esc(catName(f.cat))}${f.freq && f.freq !== 'monthly' ? ` · ${fmt(f.amount)} ${esc(freqLabel(f).toLowerCase())}` : ''}</span></li>`).join('')}</ul>`
+        : `<div class="small muted" style="padding:12px 0 4px">${esc(T('noFixed'))}</div>`}
+      <button class="btn block" id="fx-add" style="margin-top:8px">＋ ${esc(T('addFixed'))}</button>
     </div>
-    <div class="card">
-      <div class="row-between" style="margin-bottom:6px"><b>${esc(T('thisMonth'))}</b><span class="small muted">${esc(T('flexSpent'))}</span></div>
-      <div class="row-between num"><span>${fmt(b.flex)} <span class="faint">/ ${fmt(b.free)}</span></span>
-        <b style="color:${b.left < 0 ? 'var(--bad)' : 'var(--good)'}">${b.left < 0 ? esc(T('overBy')) + ' ' + fmt(-b.left) : esc(T('stillAvailable')) + ' ' + fmt(b.left)}</b></div>
-      <div class="meter-lg"><i style="width:${pct}%; ${b.left < 0 ? 'background:var(--bad)' : ''}"></i></div>
-      <div class="small faint" style="margin-top:6px">${esc(T('flexExplain'))}</div>
-    </div>
-    <div class="section-title">${esc(T('fixedCosts'))} <span class="faint">· ${fmt(b.fixedTotal)} ${esc(T('perMonth'))}</span></div>
-    <div class="card" style="padding-top:6px; padding-bottom:6px">
-      ${S.budget.fixed.length ? `<ul class="cats">${[...S.budget.fixed].sort((x, y) => monthly(y) - monthly(x)).map(f => {
-        const paid = r2(-(b.by[f.cat] || 0));
-        return `<li data-fx="${f.id}"><span class="cn ellip">${esc(f.name)}</span><span class="cv">${fmt(monthly(f))}</span>
-          <span class="small faint ellip">${esc(catName(f.cat))}${f.freq && f.freq !== 'monthly' ? ` · ${fmt(f.amount)} ${esc(freqLabel(f))}` : ''}</span>
-          <span class="small faint" style="text-align:right">${esc(T('paidIn'))}: ${fmt(paid)}</span></li>`; }).join('')}</ul>`
-        : `<div class="small muted" style="padding:10px 0">${esc(T('noFixed'))}</div>`}
-      <button class="btn block" id="fx-add" style="margin:8px 0 6px">＋ ${esc(T('addFixed'))}</button>
-    </div>
-    ${sugg.length ? `<div class="section-title">${esc(T('suggestions'))}</div>
-    <div class="card" style="padding-top:4px; padding-bottom:4px">
-      <div class="small muted" style="padding:8px 0 2px">${esc(T('suggestExplain'))}</div>
-      ${sugg.map((g, i) => `<div class="list-row" data-sg="${i}"><div class="grow"><div class="ellip" style="font-weight:500">${esc(g.name)}</div>
+    ${sugg.length ? `<button class="banner soft" id="b-sugg"><span><b>${esc(T('suggestionsN')(sugg.length))}</b><br><span class="small">${esc(T('suggestExplain'))}</span></span>${I.fwd}</button>` : ''}`,
+  };
+}
+function openSuggestions(m) {
+  const draw = (el, close) => {
+    const sugg = recurringSuggestions(m);
+    if (!sugg.length) { close(); render(); return; }
+    el.querySelector('#sg-list').innerHTML = sugg.map((g, i) => `<div class="list-row" data-sg="${i}"><div class="grow"><div class="ellip" style="font-weight:500">${esc(g.name)}</div>
         <div class="small faint">${esc(catName(g.cat))} · ${fmt(g.amount)} ${esc(T('perMonth'))}</div></div>
-        <button class="btn" data-k="add">${esc(T('add'))}</button><button class="icon-btn" data-k="no" aria-label="${esc(T('dismiss'))}">${I.x}</button></div>`).join('')}
-    </div>` : ''}`;
+        <button class="btn" data-k="add">${esc(T('add'))}</button><button class="icon-btn" data-k="no" aria-label="${esc(T('dismiss'))}">${I.x}</button></div>`).join('');
+    el.querySelectorAll('[data-sg]').forEach(row => {
+      const g = sugg[+row.dataset.sg];
+      row.querySelector('[data-k=add]').onclick = () => openFixed({ name: g.name, amount: g.amount, freq: 'monthly', cat: g.cat, key: g.key }, true, () => draw(el, close));
+      row.querySelector('[data-k=no]').onclick = async () => { S.budget.dismissed.push(g.key); await saveBudget(); render(); draw(el, close); };
+    });
+  };
+  sheet(`<h2>${esc(T('suggestions'))}</h2><p class="small muted" style="margin-top:-4px">${esc(T('suggestExplain'))}</p>
+    <div id="sg-list"></div><div class="actions"><button class="btn" id="sg-close">${esc(T('close'))}</button></div>`,
+  (el, close) => { el.querySelector('#sg-close').onclick = close; draw(el, close); });
 }
 function afterBudget() {
   const $ = id => document.getElementById(id), m = budgetMonth();
-  $('b-prev').onclick = () => { UI.budgetMonth = shiftPeriod('month', m, -1); render(); };
-  $('b-next').onclick = () => { UI.budgetMonth = shiftPeriod('month', m, 1); render(); };
+  $('bu-prev').onclick = () => { UI.budgetMonth = shiftPeriod('month', m, -1); render(); };
+  $('bu-next').onclick = () => { UI.budgetMonth = shiftPeriod('month', m, 1); render(); };
   $('b-income').onclick = () => {
     const b = budgetNumbers(m);
     numberSheet(T('income'), T('incomeHelp')(periodLabel(b.prev, 'month'), fmt(b.incomeAuto)), b.income, async v => {
@@ -924,12 +984,7 @@ function afterBudget() {
   $('b-goal').onclick = () => numberSheet(T('savingsGoal'), T('goalHelp'), S.budget.savingsGoal || 0, async v => { S.budget.savingsGoal = v ?? 0; await saveBudget(); render(); });
   $('fx-add').onclick = () => openFixed(null);
   document.querySelectorAll('[data-fx]').forEach(li => li.onclick = () => openFixed(S.budget.fixed.find(f => f.id === li.dataset.fx)));
-  const sugg = recurringSuggestions(m);
-  document.querySelectorAll('[data-sg]').forEach(row => {
-    const g = sugg[+row.dataset.sg];
-    row.querySelector('[data-k=add]').onclick = () => openFixed({ name: g.name, amount: g.amount, freq: 'monthly', cat: g.cat, key: g.key }, true);
-    row.querySelector('[data-k=no]').onclick = async () => { S.budget.dismissed.push(g.key); await saveBudget(); render(); };
-  });
+  if ($('b-sugg')) $('b-sugg').onclick = () => openSuggestions(m);
 }
 function numberSheet(titleText, help, value, onSave, resetLabel) {
   sheet(`<h2>${esc(titleText)}</h2><p class="small muted" style="margin-top:-4px">${esc(help)}</p>
@@ -943,7 +998,7 @@ function numberSheet(titleText, help, value, onSave, resetLabel) {
     q('#ns-save').onclick = () => { const v = q('#ns-v').value; if (v === '' || isNaN(+v)) { q('#ns-v').focus(); return; } close(); onSave(r2(+v)); };
   });
 }
-function openFixed(f, isNew = !f) {
+function openFixed(f, isNew = !f, onDone) {
   const cur = f ? { ...f } : { name: '', amount: '', freq: 'monthly', cat: '' };
   sheet(`<h2>${esc(isNew ? T('addFixed') : T('editFixed'))}</h2>
     <label class="field"><span>${esc(T('name'))}</span><input type="text" id="fx-name" value="${esc(cur.name)}" placeholder="${esc(T('fixedNameHint'))}"></label>
@@ -966,7 +1021,7 @@ function openFixed(f, isNew = !f) {
       if (!name) return q('#fx-name').focus(); if (!(amount > 0)) return q('#fx-amt').focus(); if (!cat) return q('#fx-cat').focus();
       const item = { id: f?.id || uid(), name, amount: r2(amount), freq: cur.freq, cat, ...(cur.key ? { key: cur.key } : {}) };
       if (isNew) S.budget.fixed.push(item); else S.budget.fixed = S.budget.fixed.map(x => x.id === item.id ? item : x);
-      await saveBudget(); close(); render();
+      await saveBudget(); close(); render(); onDone?.();
     };
   });
 }
@@ -980,6 +1035,8 @@ function openFixed(f, isNew = !f) {
   onBack(() => {
     const sc = document.querySelectorAll('.scrim');
     if (sc.length) { sc[sc.length - 1].remove(); return true; }
+    if (UI.tab === 'review') { UI.tab = 'transactions'; render(); return true; }
+    if (UI.tab === 'settings' && UI.sub) { UI.sub = null; render(); return true; }
     if (UI.tab !== 'overview') { UI.tab = 'overview'; render(); return true; }
     return false;
   });

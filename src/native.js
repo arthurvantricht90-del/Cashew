@@ -4,6 +4,7 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { App } from '@capacitor/app';
 import { FileOpener } from '@capacitor-community/file-opener';
+import { StatusBar, Style } from '@capacitor/status-bar';
 
 export const isNative = () => Capacitor.isNativePlatform();
 
@@ -39,4 +40,11 @@ export async function openPdf(name, blob) {
 // Android back button: close an open sheet, else go to Overview, else leave the app
 export function onBack(handler) {
   if (isNative()) App.addListener('backButton', () => { if (!handler()) App.exitApp(); });
+}
+
+// Colour the phone's status bar like the app header (light icons on the blue)
+export async function setStatusBar(color) {
+  const meta = document.querySelector('meta[name=theme-color]'); if (meta) meta.content = color;
+  if (!isNative()) return;
+  try { await StatusBar.setBackgroundColor({ color }); await StatusBar.setStyle({ style: Style.Dark }); } catch (e) { /* older Android */ }
 }
