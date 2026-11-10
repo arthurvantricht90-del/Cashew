@@ -2,8 +2,9 @@
 //   { id, name, detect(firstPageText) -> bool, parse(pages) -> statement, enrich(tx) -> extra fields }
 // A statement is { iban, from, to, opening, closing, transactions: [{ date, valuta, type, details[], amount }] }.
 import kbc from './kbc.js';
+import kbcExport from './kbc-export.js';
 
-export const BANKS = [kbc];
+export const BANKS = [kbc, kbcExport];
 
 export const pageText = items => items.map(i => i.str).join(' ');
 

@@ -641,6 +641,22 @@ function buildTx(parsed, pdfId, bank) {
     return { id: hash(base + '#' + seen[base]), acct, bank: bank.id, ...t, ...bank.enrich(t), seq: i, pdfId, cat: null, split: null, source: null, ruleId: null };
   });
 }
+// Which transactions in the chosen files are already in the app?
+// 1) same fingerprint (same file format), 2) otherwise the same account + date + amount that isn't matched yet.
+// The second check catches the same payment in a different download format (statement vs app export).
+function markDuplicates(results) {
+  const key = t => `${t.acct}|${t.date}|${t.amount.toFixed(2)}`;
+  const ids = new Set(S.txs.map(t => t.id)), pool = {};
+  for (const t of S.txs) pool[key(t)] = (pool[key(t)] || 0) + 1;
+  for (const r of results) {
+    if (!r.txs) continue;
+    r.dup = new Set();
+    const rest = [];
+    for (const t of r.txs) { if (ids.has(t.id)) { r.dup.add(t.id); pool[key(t)]--; } else rest.push(t); }
+    for (const t of rest) { if (pool[key(t)] > 0) { r.dup.add(t.id); pool[key(t)]--; } }
+    for (const t of r.txs) if (!r.dup.has(t.id) && t.date >= r.from && t.date <= r.to) { ids.add(t.id); pool[key(t)] = (pool[key(t)] || 0) + 1; }
+  }
+}
 function openImport() {
   let results = [];
   sheet(`<h2>${esc(T('importTitle'))}</h2>
@@ -651,13 +667,14 @@ function openImport() {
     const q = s => el.querySelector(s);
     q('#i-cancel').onclick = close;
     const existing = new Set(S.txs.map(t => t.id));
-    const count = () => results.reduce((a, r) => a + (r.txs ? r.txs.filter(t => !existing.has(t.id) && t.date >= r.from && t.date <= r.to).length : 0), 0);
+    const count = () => results.reduce((a, r) => a + (r.txs ? r.txs.filter(t => !r.dup.has(t.id) && t.date >= r.from && t.date <= r.to).length : 0), 0);
     const draw = () => {
+      markDuplicates(results);
       q('#i-res').innerHTML = results.map((r, i) => r.error ? `<div class="card small"><b>${esc(r.name)}</b><div class="warn">${esc(r.error)}</div></div>` : `
         <div class="card small" data-i="${i}">
           <div style="font-weight:600" class="ellip">${esc(r.bank.name)} · ${esc(accName(r.parsed.iban.replace(/ /g, '')))} · ${esc(r.parsed.iban)}</div>
           <div class="muted">${esc(fmtDate(r.parsed.from))} – ${esc(fmtDate(r.parsed.to))}</div>
-          <div style="margin:6px 0">${r.txs.length} ${esc(T('found'))} · <b>${r.txs.filter(t => !existing.has(t.id)).length} ${esc(T('isNew'))}</b> · ${r.txs.filter(t => existing.has(t.id)).length} ${esc(T('already'))}</div>
+          <div style="margin:6px 0">${r.txs.length} ${esc(T('found'))} · <b>${r.txs.filter(t => !r.dup.has(t.id)).length} ${esc(T('isNew'))}</b> · ${r.txs.filter(t => r.dup.has(t.id)).length} ${esc(T('already'))}</div>
           <div class="${r.balanced ? 'ok' : 'warn'}">${r.balanced ? '✓ ' + esc(T('balanceOk')) : '⚠ ' + esc(T('balanceBad'))}</div>
           <div class="field" style="margin:10px 0 0"><span>${esc(T('importRange'))}</span>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px"><input type="date" data-k="from" value="${r.from}"><input type="date" data-k="to" value="${r.to}"></div></div>
@@ -698,7 +715,7 @@ function openImport() {
         if (!r.txs) continue;
         const acct = r.parsed.iban.replace(/ /g, '');
         if (!S.accounts.some(a => a.iban === acct)) S.accounts.push({ iban: acct, name: r.bank.name.split(' ')[0] + ' ' + acct.slice(-4), role: 'own' });
-        const fresh = r.txs.filter(t => !existing.has(t.id) && t.date >= r.from && t.date <= r.to);
+        const fresh = r.txs.filter(t => !r.dup.has(t.id) && t.date >= r.from && t.date <= r.to);
         fresh.forEach(t => { existing.add(t.id); });
         added = added.concat(fresh);
         await db.putPdf({ id: r.pdfId, name: r.name, bank: r.bank.id, iban: acct, from: r.parsed.from, to: r.parsed.to, size: r.blob.size, added: iso(new Date()), blob: r.blob });
