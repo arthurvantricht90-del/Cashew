@@ -808,14 +808,23 @@ function vSettings() {
     </div>
     <div class="card"><button class="btn block danger" id="b-reset">${esc(T('resetAll'))}</button></div>`);
 }
+// Rules page: one collapsible group per category (A–Z); searching opens every group with a match
 function drawRules() {
-  const q = (document.getElementById('r-q')?.value || '').toUpperCase();
+  const q = (document.getElementById('r-q')?.value || '').trim().toUpperCase();
+  const open = UI.openRuleGroups ||= new Set();
   const list = S.rules.filter(r => !q || r.pattern.includes(q) || catName(r.cat).toUpperCase().includes(q));
-  document.getElementById('r-list').innerHTML = list.slice(0, 60).map(r => `
-    <div class="list-row small"><div class="grow ellip"><b>${esc(r.pattern)}</b>${r.amount != null ? ` <span class="faint">= ${fmt(r.amount)}</span>` : ''}
-      → ${r.split ? r.split.map(p => `${esc(catName(p.cat))} ${fmt(p.amount)} + `).join('') : ''}${esc(catName(r.cat))}</div>
-      <button class="icon-btn" data-delrule="${r.id}" aria-label="${esc(T('del'))}">${I.x}</button></div>`).join('') +
-    (list.length > 60 ? `<div class="small faint" style="padding-top:8px">+${list.length - 60}…</div>` : '');
+  const groups = {};
+  for (const r of list) (groups[r.cat] ||= []).push(r);
+  const order = sortCats(S.cats.filter(c => groups[c.id])).map(c => c.id).concat(Object.keys(groups).filter(id => !S.cats.some(c => c.id === id)));
+  const row = r => `<div class="list-row small"><div class="grow ellip"><b>${esc(r.pattern)}</b>${r.amount != null ? ` <span class="faint">= ${fmt(r.amount)}</span>` : ''}
+      ${r.split ? `<span class="faint"> · ${r.split.map(p => `${esc(catName(p.cat))} ${fmt(p.amount)}`).join(', ')} + ${esc(T('remainder').toLowerCase())}</span>` : ''}</div>
+      <button class="icon-btn" data-delrule="${r.id}" aria-label="${esc(T('del'))}">${I.x}</button></div>`;
+  document.getElementById('r-list').innerHTML = order.length ? order.map(id => `
+    <details class="rule-group" data-g="${id}" ${q || open.has(id) ? 'open' : ''}>
+      <summary><span>${esc(catName(id))}</span><span class="faint">${groups[id].length}</span></summary>
+      ${groups[id].map(row).join('')}
+    </details>`).join('') : `<div class="small muted" style="padding:8px 0">${esc(T('noData'))}</div>`;
+  document.querySelectorAll('.rule-group').forEach(d => d.ontoggle = () => { if (!q) d.open ? open.add(d.dataset.g) : open.delete(d.dataset.g); });
   document.querySelectorAll('[data-delrule]').forEach(b => b.onclick = async () => {
     S.rules = S.rules.filter(r => r.id !== b.dataset.delrule); await db.set('rules', S.rules); await reapplyAll(); drawRules();
   });

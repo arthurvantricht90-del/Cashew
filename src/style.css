@@ -245,3 +245,12 @@ details.card summary { margin: 0; }
 .tx .a.pos, .num.pos { color: var(--good); }
 nav.bottom .in { grid-template-columns: repeat(4, 1fr); }
 .badge { left: calc(50% + 4px); }
+
+.rule-group { border-bottom: 1px solid var(--line); }
+.rule-group:last-child { border-bottom: 0; }
+.rule-group summary { display: flex; justify-content: space-between; align-items: center; padding: 12px 2px; cursor: pointer; font-weight: 600; color: var(--text); font-size: 15px; margin: 0; list-style: none; }
+.rule-group summary::-webkit-details-marker { display: none; }
+.rule-group summary::before { content: '▸'; color: var(--text-3); margin-right: 8px; transition: transform .15s; display: inline-block; }
+.rule-group[open] summary::before { transform: rotate(90deg); }
+.rule-group summary span:first-child { flex: 1; }
+.rule-group .list-row { padding-left: 18px; }
